@@ -193,8 +193,8 @@ class LM(BaseLM):
 
         self._check_truncation(results)
 
-        if not getattr(results, "cache_hit", False) and dspy.settings.usage_tracker and hasattr(results, "usage"):
-            settings.usage_tracker.add_usage(self.model, dict(results.usage))
+        if not getattr(results, "cache_hit", False) and dspy.settings.usage_tracker:
+            settings.usage_tracker.add_usage(self.model, dict(getattr(results, "usage", {})))
         return results
 
     async def aforward(
@@ -234,8 +234,8 @@ class LM(BaseLM):
 
         self._check_truncation(results)
 
-        if not getattr(results, "cache_hit", False) and dspy.settings.usage_tracker and hasattr(results, "usage"):
-            settings.usage_tracker.add_usage(self.model, dict(results.usage))
+        if not getattr(results, "cache_hit", False) and dspy.settings.usage_tracker:
+            settings.usage_tracker.add_usage(self.model, dict(getattr(results, "usage", {})))
         return results
 
     def launch(self, launch_kwargs: dict[str, Any] | None = None):
@@ -434,14 +434,14 @@ async def alitellm_completion(request: dict[str, Any], num_retries: int, cache: 
     cache = cache or {"no-cache": True, "no-store": True}
     request = dict(request)
     request.pop("rollout_id", None)
-    headers = request.pop("headers", None)
-    stream_completion = _get_stream_completion_fn(request, cache, sync=False)
+    headers = _add_dspy_identifier_to_headers(request.pop("headers", None))
+    stream_completion = _get_stream_completion_fn(request, cache, sync=False, headers=headers)
     if stream_completion is None:
         return await litellm.acompletion(
             cache=cache,
             num_retries=num_retries,
             retry_strategy="exponential_backoff_retry",
-            headers=_add_dspy_identifier_to_headers(headers),
+            headers=headers,
             **request,
         )
 
@@ -516,8 +516,9 @@ def _convert_chat_request_to_responses_request(request: dict[str, Any]):
     """
     request = dict(request)
     if "messages" in request:
-        content_blocks = []
+        input_items = []
         for msg in request.pop("messages"):
+            content_blocks = []
             c = msg.get("content")
             if isinstance(c, str):
                 content_blocks.append({"type": "input_text", "text": c})
@@ -525,7 +526,8 @@ def _convert_chat_request_to_responses_request(request: dict[str, Any]):
                 # Convert each content item from Chat API format to Responses API format
                 for item in c:
                     content_blocks.append(_convert_content_item_to_responses_format(item))
-        request["input"] = [{"role": msg.get("role", "user"), "content": content_blocks}]
+            input_items.append({"role": msg.get("role", "user"), "content": content_blocks})
+        request["input"] = input_items
     # Convert `reasoning_effort` to reasoning format supported by the Responses API
     if "reasoning_effort" in request:
         effort = request.pop("reasoning_effort")
